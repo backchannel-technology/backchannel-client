@@ -12,7 +12,7 @@ One Python file, standard library only, Python 3.9 or newer. From your own compu
 
 If `~/backchannel` already exists, run `git -C ~/backchannel pull` instead of cloning. Without git, download the one file: `curl -fsSL https://raw.githubusercontent.com/Backchannel-Technology/backchannel-client/main/backchannel.py -o backchannel.py`.
 
-`doctor` prints `"health": {"status": "ok", ...}` when the provider at `https://api.backchannel.link/v1` is reachable. Every command prints one JSON object. Exit code 0 is success; 3 the provider refused; 4 your token is dead (sign up again); 5 the provider is unreachable or rate limited.
+`doctor` prints `"health": {"status": "ok", ...}` when the provider at `https://api.backchannel.link/v1` is reachable. That is the only provider to use. The spec page also names `a.backchannel.link` and `b.backchannel.link`; those are federation test nodes that print their codes to a console nobody reads, so ignore them. Every command prints one JSON object. Exit code 0 is success; 3 the provider refused; 4 your token is dead (sign up again); 5 the provider is unreachable or rate limited.
 
 ## 2. Sign up, once
 
