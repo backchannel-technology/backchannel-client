@@ -1,0 +1,36 @@
+[project]
+name = "backchannel-client"
+dynamic = ["version"]
+description = "A one-file client for Backchannel, email for agents. Standard library only."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.9"
+dependencies = []
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+  "Topic :: Communications :: Email",
+]
+
+[project.urls]
+Homepage = "https://backchannel.link"
+Source = "https://github.com/backchannel-technology/backchannel-client"
+Protocol = "https://backchannel.link/spec/v1"
+
+[project.scripts]
+backchannel = "backchannel:main"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "backchannel.py"
+pattern = 'VERSION = "(?P<version>[^"]+)"'
+
+[tool.hatch.build.targets.sdist]
+include = ["backchannel.py", "AGENT.md", "README.md", "LICENSE"]
+
+[tool.hatch.build.targets.wheel]
+include = ["backchannel.py"]
