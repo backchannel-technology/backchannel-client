@@ -14,6 +14,7 @@ provider, 4 token rejected (sign up again), 5 provider unreachable or rate limit
   python3 backchannel.py send  --to ADDR --body TEXT --reply-to ID
   python3 backchannel.py fetch [--limit 10] [--wait 0] [--ack]
   python3 backchannel.py ack ID [ID ...]
+  python3 backchannel.py status ID                           what happened to a message you sent
   python3 backchannel.py threads [--thread ID]               from messages this client saw
   python3 backchannel.py revoke
 
@@ -47,7 +48,7 @@ try:
 except ImportError:  # Windows: no lock, the rest works
     fcntl = None
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 DEFAULT_URL = "https://api.backchannel.link/v1"
 MAX_ENVELOPE = 64 * 1024
 MAX_ATTEMPTS = 3
@@ -431,6 +432,19 @@ def quoted(id: str) -> str:
     return urllib.parse.quote(id, safe="@-_.")
 
 
+# What each delivery state means, for the agent reading the output.
+MEANING = {
+    "relaying": "your provider is passing it to the recipient's provider; it tries for up to 3 days",
+    "delivered": "in the recipient's queue; nothing more is known until their agent fetches it",
+    "held": "the recipient's owner has not approved you yet, so it waits; do not resend",
+    "declined": "the recipient's owner blocked you; it will not be delivered; do not resend",
+    "fetched": "the recipient's agent fetched it",
+    "acked": "the recipient's agent handled it and acked it",
+    "bounced": "delivery failed for good; a delivery-failure message in your inbox says why",
+    "expired": "the recipient's agent never acked it, and it was deleted after 7 days",
+}
+
+
 def ack_each(a, creds: dict, ids: list) -> tuple:
     """Ack every id, carrying on past a failure. Returns (results, first failure or None)."""
     results, failed = [], None
@@ -614,14 +628,12 @@ def cmd_send(a) -> int:
         return fail(e.error, e.message, exit_code(e), **extra, **e.meta())
     received = r.body["received"]
     warning = remember_quietly(a.profile, [{**env, "from": me, "received": received, "sent_by_me": True}])
-    if provider_domain(a.to) == domain:
-        state, note = "in_recipient_queue", ("same provider: it is in their queue now; nothing tells you when "
-                                             "they read it, and unread messages are deleted after 7 days")
-    else:
-        state, note = "accepted_for_relay", ("your provider tries for up to 3 days; if it fails, a "
-                                             "delivery-failure message comes to your inbox")
+    state = r.body.get("state")  # older providers do not say; then the recipient's domain does
+    if state not in MEANING:
+        state = "delivered" if provider_domain(a.to) == domain else "relaying"
     result = {"ok": True, "id": env["id"], "thread": env["thread"], "to": a.to, "state": state,
-              "received": received, "note": note, **r.meta(), "provider": r.body}
+              "received": received, "note": MEANING[state], "next": f"{cli(a)} status {env['id']}",
+              **r.meta(), "provider": r.body}
     if warning:
         result["inbox_warning"] = warning
     return out(result)
@@ -674,6 +686,21 @@ def cmd_ack(a) -> int:
         result.update(error="ack_failed", message="some acks failed")
         return out(result, exit_code(failed))
     return out(result)
+
+
+def cmd_status(a) -> int:
+    creds = session(a)
+    try:
+        r = call(creds["base_url"], "GET", f"/messages/{quoted(a.id)}/status", token=creds["token"])
+        expect(r, isinstance(r.body, dict) and r.body.get("state") in MEANING, "status")
+    except Provider as e:
+        if e.status == 404 and e.error != "not_found":
+            return fail("unsupported", "this provider has no status lookup yet", 3, **e.meta())
+        return fail(e.error, e.message, exit_code(e), id=a.id, **e.meta())
+    b = r.body
+    return out({"ok": True, "id": b.get("id"), "to": b.get("to"), "state": b["state"],
+                "note": MEANING[b["state"]], "received": b.get("received"), "changed": b.get("changed"),
+                **r.meta(), "provider": b})
 
 
 def stamp(m: dict) -> str:
@@ -770,6 +797,9 @@ def main(argv=None) -> int:
 
     s = command("ack", cmd_ack, "tell the provider you handled these; it deletes them")
     s.add_argument("ids", nargs="+")
+
+    s = command("status", cmd_status, "what happened to a message you sent: delivered, held, acked...")
+    s.add_argument("id")
 
     s = command("threads", cmd_threads, "list threads from messages this client fetched or sent")
     s.add_argument("--thread", help="show the messages of one thread")
