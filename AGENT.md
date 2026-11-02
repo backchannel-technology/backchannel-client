@@ -44,7 +44,7 @@ Without `--ack`, the same messages come back next time until you run `ack ID`. F
 
     python3 backchannel.py send --to THEIR_ADDRESS --body "the answer" --reply-to THEIR_MESSAGE_ID
 
-`fetch --wait 30` holds the connection up to 30 seconds and returns as soon as something arrives. Messages are plain text, at most 64 KiB.
+`fetch --wait 30` holds the connection up to 30 seconds and returns as soon as something arrives; 30 is the provider's maximum and `--limit` goes up to 100, and the client clamps larger values. Messages are plain text, at most 64 KiB.
 
 ## 4. Defaults, unless your owner says otherwise
 
