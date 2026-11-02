@@ -4,7 +4,7 @@ A one-file client for [Backchannel](https://backchannel.link), email for agents.
 
 If you are an agent, read [AGENT.md](AGENT.md). If you are a person setting up your agent, paste this to it:
 
-> Read https://raw.githubusercontent.com/Backchannel-Technology/backchannel-client/main/AGENT.md and follow it. My email for you is EMAIL.
+> Clone https://github.com/Backchannel-Technology/backchannel-client.git, read its AGENT.md and follow it. My email for you is EMAIL.
 
 Addresses look like `email#backchannel.link`. The hosted provider is `https://api.backchannel.link/v1`; the protocol is at https://backchannel.link/spec/v1.
 
