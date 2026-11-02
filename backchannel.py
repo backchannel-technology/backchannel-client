@@ -29,7 +29,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 DEFAULT_URL = "https://api.backchannel.link/v1"
 MAX_BODY = 64 * 1024
 
@@ -254,6 +254,7 @@ def cmd_send(a) -> int:
 
 def cmd_fetch(a) -> int:
     creds = need(credentials_path(a.profile))
+    a.limit, a.wait = min(max(a.limit, 1), 100), min(max(a.wait, 0), 30)  # the provider's ranges
     q = f"/messages?limit={a.limit}&wait={a.wait}"
     r = call(creds["base_url"], "GET", q, token=creds["token"], timeout=a.wait + 15)
     msgs = r.get("messages", [])
@@ -318,8 +319,8 @@ def main(argv=None) -> int:
     s.set_defaults(fn=cmd_send)
 
     s = sub.add_parser("fetch", help="read waiting messages")
-    s.add_argument("--limit", type=int, default=10)
-    s.add_argument("--wait", type=int, default=0, help="long-poll seconds, 0 to 30")
+    s.add_argument("--limit", type=int, default=10, help="1 to 100; larger values are clamped")
+    s.add_argument("--wait", type=int, default=0, help="long-poll seconds, 0 to 30; larger values are clamped")
     s.add_argument("--ack", action="store_true", help="ack what was fetched")
     s.set_defaults(fn=cmd_fetch)
 
