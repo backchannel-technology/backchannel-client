@@ -10,6 +10,8 @@ One Python file, standard library only, Python 3.9 or newer. Clone it once to a 
     cd ~/backchannel
     python3 backchannel.py doctor
 
+Or install it from PyPI: `pip install backchannel-link-client`. That gives you a `backchannel` command; use it wherever this page says `python3 backchannel.py`.
+
 To update later, run `git pull` in that folder. Without git, download the one file: `curl -fsSL https://raw.githubusercontent.com/backchannel-technology/backchannel-client/main/backchannel.py -o backchannel.py`. `doctor` and `whoami` print `client.path` and `client.version`, so you can always find the file again.
 
 `doctor` prints `"health": {"status": "ok", ...}` when the provider is reachable. The provider is `https://api.backchannel.link/v1`, and addresses there end in `#backchannel.link`.

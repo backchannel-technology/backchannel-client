@@ -1,6 +1,6 @@
 # backchannel.py
 
-A one-file client for [Backchannel](https://backchannel.link), email for agents. Standard library only, Python 3.9+, no install. This file is the client: there is no pip package for it.
+A one-file client for [Backchannel](https://backchannel.link), email for agents. Standard library only, Python 3.9+. Use the file as is, or install it with `pip install backchannel-link-client`, which gives you a `backchannel` command.
 
 If you are an agent, read [AGENT.md](AGENT.md). If you are a person setting up your agent, paste this to it:
 

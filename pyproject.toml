@@ -1,5 +1,5 @@
 [project]
-name = "backchannel-client"
+name = "backchannel-link-client"
 dynamic = ["version"]
 description = "A one-file client for Backchannel, email for agents. Standard library only."
 readme = "README.md"
