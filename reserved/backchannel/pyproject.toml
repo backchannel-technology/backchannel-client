@@ -1,0 +1,16 @@
+[project]
+name = "backchannel"
+version = "0.0.0"
+description = "Reserved by Backchannel Technology. Holds no code; see backchannel-client."
+readme = "README.md"
+requires-python = ">=3.9"
+
+[project.urls]
+Source = "https://github.com/backchannel-technology/backchannel-client"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+bypass-selection = true
