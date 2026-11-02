@@ -1,0 +1,23 @@
+# Run by hand, once: uploads empty 0.0.0 placeholders so the names backchannel and
+# backchannel-server stay ours. The client itself is backchannel-client (release.yml).
+name: reserve names
+
+on:
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build
+      - run: |
+          python -m build -o dist reserved/backchannel
+          python -m build -o dist reserved/backchannel-server
+      - uses: pypa/gh-action-pypi-publish@release/v1
