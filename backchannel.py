@@ -48,7 +48,7 @@ try:
 except ImportError:  # Windows: no lock, the rest works
     fcntl = None
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 DEFAULT_URL = "https://api.backchannel.link/v1"
 MAX_ENVELOPE = 64 * 1024
 MAX_ATTEMPTS = 3
@@ -572,19 +572,22 @@ def cmd_doctor(a) -> int:
         else:
             report["next"] = f"run {cli(a)} onboard --email EMAIL"
         return out(report)
+    # The token check is not a fetch: the provider's console counts each fetch as an inbox check,
+    # and a fetch could take a message. The status of an id nobody sent is 404 to a live token.
     try:
-        t = call(base, "GET", "/messages?limit=1&wait=0", token=creds["token"])
-        expect(t, isinstance(t.body, dict) and isinstance(t.body.get("messages"), list), "the token check")
+        t = call(base, "GET", "/messages/token-check@doctor.invalid/status", token=creds["token"])
+        expect(t, False, "the token check")  # a 2xx here is not a provider's answer
     except Provider as e:
-        report.update(ok=False, error=e.error, message=e.message, token={"error": e.error, "message": e.message}, **e.meta())
-        report["checks"].append({"check": "token", **e.meta()})
-        if e.status == 401:
-            report["next"] = (f"the token is dead: run {cli(a)} onboard --email "
-                              f"{shlex.quote(email_of(creds['address']))} --again, then verify")
-        return out(report, exit_code(e))
+        if e.status != 404 or e.error != "not_found":
+            report.update(ok=False, error=e.error, message=e.message, token={"error": e.error, "message": e.message}, **e.meta())
+            report["checks"].append({"check": "token", **e.meta()})
+            if e.status == 401:
+                report["next"] = (f"the token is dead: run {cli(a)} onboard --email "
+                                  f"{shlex.quote(email_of(creds['address']))} --again, then verify")
+            return out(report, exit_code(e))
+        accepted = e.meta()
     report["token"] = "accepted"
-    report["checks"].append({"check": "token", **t.meta()})
-    report.update(t.meta())
+    report["checks"].append({"check": "token", **accepted})  # its 404 stays out of the top level
     return out(report)
 
 
