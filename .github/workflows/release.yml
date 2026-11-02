@@ -1,10 +1,10 @@
-# Publishes to PyPI when a GitHub release is published. Uses trusted publishing: no token.
+# Publishes to PyPI when a version tag is pushed. Uses trusted publishing: no token.
 # The tag must match VERSION in backchannel.py, e.g. v0.3.0.
 name: release
 
 on:
-  release:
-    types: [published]
+  push:
+    tags: ["v*"]
 
 jobs:
   build:
