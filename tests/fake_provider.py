@@ -84,14 +84,14 @@ class FakeProvider:
         if path == "/messages" and method == "GET":
             limit = int(query.get("limit", ["10"])[0])
             return 200, {"messages": list(self.queues.get(me, [])[:limit])}
-        m = re.fullmatch(r"/messages/(.+)/ack", path)
+        m = re.fullmatch(r"/messages/([^/]+)/ack", path)
         if m and method == "POST":
             id = unquote(m[1])
             self.queues[me] = [x for x in self.queues.get(me, []) if x["id"] != id]
             if id in self.sent:
                 self.sent[id]["state"] = "acked"
             return 204, None
-        m = re.fullmatch(r"/messages/(.+)/status", path)
+        m = re.fullmatch(r"/messages/([^/]+)/status", path)
         if m and method == "GET":
             s = self.sent.get(unquote(m[1]))
             if s is None or s["from"] != me:
