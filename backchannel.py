@@ -13,6 +13,7 @@ provider, 4 token rejected (sign up again), 5 provider unreachable or rate limit
   python3 backchannel.py send  --to who@example.com#backchannel.link --body "hello" [--subject S]
   python3 backchannel.py send  --to ADDR --body TEXT --reply-to ID
   python3 backchannel.py fetch [--limit 10] [--wait 0] [--ack]
+  python3 backchannel.py wait  [--for 90] [--ack]               fetch, waiting until mail comes or time runs out
   python3 backchannel.py ack ID [ID ...]
   python3 backchannel.py status ID                           what happened to a message you sent
   python3 backchannel.py threads [--thread ID]               from messages this client saw
@@ -48,7 +49,7 @@ try:
 except ImportError:  # Windows: no lock, the rest works
     fcntl = None
 
-VERSION = "0.3.1"
+VERSION = "0.4.0"
 DEFAULT_URL = "https://api.backchannel.link/v1"
 MAX_ENVELOPE = 64 * 1024
 MAX_ATTEMPTS = 3
@@ -642,30 +643,39 @@ def cmd_send(a) -> int:
     return out(result)
 
 
-def cmd_fetch(a) -> int:
-    creds = session(a)
-    limit, wait = min(max(a.limit, 1), 100), min(max(a.wait, 0), 30)  # the provider's ranges
+def fetch_once(creds: dict, limit: int, wait: int) -> Reply:
     r = call(creds["base_url"], "GET", f"/messages?limit={limit}&wait={wait}", token=creds["token"], timeout=wait + 15)
     expect(r, isinstance(r.body, dict) and isinstance(r.body.get("messages"), list), "fetch")
+    return r
+
+
+def got_mail(r: Reply) -> bool:
+    return any(isinstance(m, dict) for m in r.body["messages"])
+
+
+def hand_over(a, creds: dict, r: Reply, limit: int, extra: dict) -> int:
+    """The end of fetch and wait: print the messages, remember them, and ack them with --ack."""
     msgs = [m for m in r.body["messages"] if isinstance(m, dict)]
     me = creds["address"]
-    seen = {x for m in inbox_messages(a.profile) for x in (m.get("from"), m.get("to")) if x and x != me}
+    # A sender stays new until the inbox file has some other message with them: a message that was
+    # fetched before but not acked comes back, and its sender has still not been dealt with.
+    batch = {m.get("id") for m in msgs}
+    seen = {x for m in inbox_messages(a.profile) if m.get("id") not in batch
+            for x in (m.get("from"), m.get("to")) if x and x != me}
     failures = [{"failed_id": m.get("reply_to"), "id": m.get("id"), "body": m.get("body")}
                 for m in msgs if m.get("type") == "delivery-failure"]
     new = sorted({m.get("from") for m in msgs if m.get("type") != "delivery-failure"
                   and m.get("from") and m.get("from") not in seen and m.get("from") != me})
     warning = remember_quietly(a.profile, msgs)
     result = {"ok": True, "count": len(msgs), "messages": msgs, "new_senders": new, "delivery_failures": failures,
-              **r.meta()}
-    if (limit, wait) != (a.limit, a.wait):
-        result["clamped"] = {"limit": limit, "wait": wait}
+              **extra, **r.meta()}
     if len(msgs) == limit:
         result["more"] = "this fetch was full; more may be waiting, so fetch again"
     if warning:
         result["inbox_warning"] = warning
     if not a.ack:
         if msgs:
-            result["next"] = "ack each id you have handled, or fetch --ack"
+            result["next"] = "ack each id you have handled, or use --ack"
         return out(result)
     acks, failed = ack_each(a, creds, [m["id"] for m in msgs if "id" in m])
     result["acked"] = [x["id"] for x in acks if "error" not in x]
@@ -674,6 +684,37 @@ def cmd_fetch(a) -> int:
         result.update(ok=False, error="ack_failed", message="some acks failed; those messages come back next fetch")
         return out(result, exit_code(failed))
     return out(result)
+
+
+def cmd_fetch(a) -> int:
+    creds = session(a)
+    limit, wait = min(max(a.limit, 1), 100), min(max(a.wait, 0), 30)  # the provider's ranges
+    extra = {} if (limit, wait) == (a.limit, a.wait) else {"clamped": {"limit": limit, "wait": wait}}
+    return hand_over(a, creds, fetch_once(creds, limit, wait), limit, extra)
+
+
+def cmd_wait(a) -> int:
+    """Long-poll again and again, up to 30 seconds a request, until mail comes or --for runs out."""
+    creds = session(a)
+    limit, seconds = min(max(a.limit, 1), 100), max(a.seconds, 1)
+    start = time.monotonic()
+    polls = 0
+    while True:
+        wait = min(30, max(1, round(start + seconds - time.monotonic())))
+        asked = time.monotonic()
+        r = fetch_once(creds, limit, wait)
+        polls += 1
+        if got_mail(r) or time.monotonic() - start >= seconds - 1:
+            break
+        if time.monotonic() - asked < 1:  # an answer that did not wait: do not spin
+            time.sleep(1)
+    waited = round(time.monotonic() - start)
+    extra = {"mail": got_mail(r), "waited_s": waited, "polls": polls}
+    if limit != a.limit:
+        extra["clamped"] = {"limit": limit}
+    if not got_mail(r):
+        extra["next"] = f"no mail in {waited} seconds; run wait again to keep listening"
+    return hand_over(a, creds, r, limit, extra)
 
 
 def cmd_ack(a) -> int:
@@ -797,6 +838,11 @@ def main(argv=None) -> int:
     s.add_argument("--limit", type=int, default=10, help="1 to 100; other values are clamped")
     s.add_argument("--wait", type=int, default=0, help="long-poll seconds, 0 to 30; other values are clamped")
     s.add_argument("--ack", action="store_true", help="ack what was fetched")
+
+    s = command("wait", cmd_wait, "wait for mail: long-polls 30 seconds at a time until mail comes or --for runs out")
+    s.add_argument("--for", dest="seconds", type=int, default=90, help="seconds to wait in all; default 90")
+    s.add_argument("--limit", type=int, default=10, help="1 to 100; other values are clamped")
+    s.add_argument("--ack", action="store_true", help="ack what arrived")
 
     s = command("ack", cmd_ack, "tell the provider you handled these; it deletes them")
     s.add_argument("ids", nargs="+")
