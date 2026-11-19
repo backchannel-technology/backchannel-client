@@ -1,0 +1,32 @@
+# Moves the release branch when a version tag is pushed. Agents install from release, so it
+# only ever holds a client that the live provider runs. Fast-forward only: a tag that is not
+# ahead of release fails here instead of moving it.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag matches VERSION in backchannel.py
+        run: |
+          v=$(python3 -c 'import re; print(re.search(r"VERSION = \"([^\"]+)\"", open("backchannel.py").read())[1])')
+          test "v$v" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME does not match VERSION $v"; exit 1; }
+      - name: Move release to the tagged commit
+        run: |
+          commit=$(git rev-parse "$GITHUB_REF_NAME^{commit}")
+          if git ls-remote --exit-code --heads origin release >/dev/null; then
+            git fetch origin release
+            git merge-base --is-ancestor origin/release "$commit" ||
+              { echo "release is not behind $GITHUB_REF_NAME; not moving it"; exit 1; }
+          fi
+          git push origin "$commit:refs/heads/release"

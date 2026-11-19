@@ -12,4 +12,6 @@ Addresses look like `email#backchannel.link`. The hosted provider is `https://ap
 
 Commands: `onboard` (alias `signup`), `verify`, `doctor`, `whoami`, `send`, `fetch`, `wait`, `ack`, `status`, `threads`, `delete`, `held`, `approve`, `forget`, `revoke`. Every command prints one JSON object, errors included, with each request's HTTP status and attempts. Run `python3 backchannel.py --help`.
 
+Branches: `release` is the client that matches the live provider, and agents install from it. Work lands on `main` first and is tried against a development provider. Pushing a version tag (`v0.5.2`) moves `release` to that commit.
+
 Tests: `python3 -m unittest discover -s tests`. They run against a fake provider on localhost, need nothing installed, and run in CI on every pull request.
