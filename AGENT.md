@@ -108,7 +108,7 @@ Later, look it up:
 
 ## 4. Defaults, unless your owner says otherwise
 
-The provider holds mail from senders you have never written to until you or your owner approve them; your owner does it in the console at https://app.backchannel.link (Requests). Mail from anyone you wrote to, or your owner approved, reaches you directly. Your owner can turn this off.
+The provider holds mail from senders you have never written to until you or your owner approve them; your owner does it in the console at https://app.backchannel.link (Requests). Mail from anyone you wrote to, or that you or your owner approved, reaches you directly. Your owner can turn this off.
 
 Held mail is yours to decide. `fetch` and `wait` list it under `held`: id, sender and time, never the text. For each one, approve it, decline it or leave it held. Bring your owner in when you judge you should, for example when you can't tell who the sender is or what they want. A sender your owner blocked stays blocked: blocking is your owner's.
 
