@@ -12,8 +12,9 @@ provider, 4 token rejected (sign up again), 5 provider unreachable or rate limit
   python3 backchannel.py whoami                              address, files, client; no request
   python3 backchannel.py send  --to who@example.com#backchannel.link --body "hello" [--subject S]
   python3 backchannel.py send  --to ADDR --body TEXT --reply-to ID
+  python3 backchannel.py send  --to ADDR --body TEXT --wait 100 --ack  then wait for mail, as wait does
   python3 backchannel.py fetch [--limit 10] [--wait 0] [--ack]
-  python3 backchannel.py wait  [--for 90] [--ack]               fetch, waiting until mail comes or time runs out
+  python3 backchannel.py wait  [--for 100] [--ack]               fetch, waiting until mail comes or time runs out
   python3 backchannel.py ack ID [ID ...]
   python3 backchannel.py status ID                           what happened to a message you sent
   python3 backchannel.py threads [--thread ID]               from messages this client saw
@@ -640,7 +641,27 @@ def cmd_send(a) -> int:
               **r.meta(), "provider": r.body}
     if warning:
         result["inbox_warning"] = warning
+    if a.wait is not None:
+        result["wait"] = wait_after_send(a, creds, state)
     return out(result)
+
+
+# A send in one of these states will not be answered soon, so send --wait does not wait.
+NO_REPLY_COMING = ("held", "declined", "bounced")
+
+
+def wait_after_send(a, creds: dict, state: str) -> dict:
+    """send --wait: wait as the wait command does. The send already worked, so a failure here is
+    reported inside this result and never changes send's exit code: the message must not be sent twice."""
+    if state in NO_REPLY_COMING:
+        return {"ok": True, "skipped": True, "mail": False,
+                "note": f"not waiting: the send is {state}, so no reply is coming soon"}
+    try:
+        w, _ = listen(a, creds, a.wait, 10)
+    except Provider as e:
+        return {"ok": False, "error": e.error, "message": e.message, **e.meta(),
+                "next": f"the message was sent; do not send it again. Run {cli(a)} wait to keep listening"}
+    return w
 
 
 def fetch_once(creds: dict, limit: int, wait: int) -> Reply:
@@ -653,8 +674,8 @@ def got_mail(r: Reply) -> bool:
     return any(isinstance(m, dict) for m in r.body["messages"])
 
 
-def hand_over(a, creds: dict, r: Reply, limit: int, extra: dict) -> int:
-    """The end of fetch and wait: print the messages, remember them, and ack them with --ack."""
+def hand_over(a, creds: dict, r: Reply, limit: int, extra: dict) -> tuple:
+    """The end of fetch and wait: the messages, remembered, and acked with --ack. Returns (result, exit code)."""
     msgs = [m for m in r.body["messages"] if isinstance(m, dict)]
     me = creds["address"]
     # A sender stays new until the inbox file has some other message with them: a message that was
@@ -676,27 +697,27 @@ def hand_over(a, creds: dict, r: Reply, limit: int, extra: dict) -> int:
     if not a.ack:
         if msgs:
             result["next"] = "ack each id you have handled, or use --ack"
-        return out(result)
+        return result, 0
     acks, failed = ack_each(a, creds, [m["id"] for m in msgs if "id" in m])
     result["acked"] = [x["id"] for x in acks if "error" not in x]
     result["acks"] = acks
     if failed:
         result.update(ok=False, error="ack_failed", message="some acks failed; those messages come back next fetch")
-        return out(result, exit_code(failed))
-    return out(result)
+        return result, exit_code(failed)
+    return result, 0
 
 
 def cmd_fetch(a) -> int:
     creds = session(a)
     limit, wait = min(max(a.limit, 1), 100), min(max(a.wait, 0), 30)  # the provider's ranges
     extra = {} if (limit, wait) == (a.limit, a.wait) else {"clamped": {"limit": limit, "wait": wait}}
-    return hand_over(a, creds, fetch_once(creds, limit, wait), limit, extra)
+    return out(*hand_over(a, creds, fetch_once(creds, limit, wait), limit, extra))
 
 
-def cmd_wait(a) -> int:
-    """Long-poll again and again, up to 30 seconds a request, until mail comes or --for runs out."""
-    creds = session(a)
-    limit, seconds = min(max(a.limit, 1), 100), max(a.seconds, 1)
+def listen(a, creds: dict, seconds: int, limit: int) -> tuple:
+    """Long-poll again and again, up to 30 seconds a request, until mail comes or the seconds run out.
+    Returns (result, exit code), as hand_over does."""
+    seconds = max(seconds, 1)
     start = time.monotonic()
     polls = 0
     while True:
@@ -710,11 +731,18 @@ def cmd_wait(a) -> int:
             time.sleep(1)
     waited = round(time.monotonic() - start)
     extra = {"mail": got_mail(r), "waited_s": waited, "polls": polls}
-    if limit != a.limit:
-        extra["clamped"] = {"limit": limit}
     if not got_mail(r):
         extra["next"] = f"no mail in {waited} seconds; run wait again to keep listening"
     return hand_over(a, creds, r, limit, extra)
+
+
+def cmd_wait(a) -> int:
+    creds = session(a)
+    limit = min(max(a.limit, 1), 100)
+    result, code = listen(a, creds, a.seconds, limit)
+    if limit != a.limit:
+        result["clamped"] = {"limit": limit}
+    return out(result, code)
 
 
 def cmd_ack(a) -> int:
@@ -833,6 +861,9 @@ def main(argv=None) -> int:
     s.add_argument("--reply-to", help="id of the message you answer; thread and subject come from the inbox file")
     s.add_argument("--thread", help="thread id, when the inbox file does not have the --reply-to id")
     s.add_argument("--id", help="resend with the id an earlier failed send printed; stored once")
+    s.add_argument("--wait", type=int, metavar="SECONDS",
+                   help="then wait this long for mail, as the wait command does; not when held, declined or bounced")
+    s.add_argument("--ack", action="store_true", help="with --wait: ack what arrived")
 
     s = command("fetch", cmd_fetch, "read waiting messages")
     s.add_argument("--limit", type=int, default=10, help="1 to 100; other values are clamped")
@@ -840,7 +871,7 @@ def main(argv=None) -> int:
     s.add_argument("--ack", action="store_true", help="ack what was fetched")
 
     s = command("wait", cmd_wait, "wait for mail: long-polls 30 seconds at a time until mail comes or --for runs out")
-    s.add_argument("--for", dest="seconds", type=int, default=90, help="seconds to wait in all; default 90")
+    s.add_argument("--for", dest="seconds", type=int, default=100, help="seconds to wait in all; default 100")
     s.add_argument("--limit", type=int, default=10, help="1 to 100; other values are clamped")
     s.add_argument("--ack", action="store_true", help="ack what arrived")
 
