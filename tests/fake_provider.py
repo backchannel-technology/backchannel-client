@@ -1,7 +1,8 @@
 """A small in-memory Backchannel provider for the tests. Standard library only.
 
 It speaks enough of the v1 API for backchannel.py: health, sign-up, send, fetch, ack, status,
-history and revoke. Tests can queue scripted answers with fail_next() to exercise retries and errors.
+history, held mail, approve, contacts and revoke. hold(address) makes an address hold mail
+from senders it does not know. Tests can queue scripted answers with fail_next() to exercise retries and errors.
 """
 
 from __future__ import annotations
@@ -29,6 +30,10 @@ class FakeProvider:
         self.queues = {}  # address -> list of envelopes
         self.sent = {}  # id -> {"to", "state", "received", "from"}
         self.history = {}  # address -> every envelope it sent or received, oldest first
+        self.holding = set()  # addresses that hold mail from unknown senders
+        self.known = set()  # (address, sender) pairs that are delivered directly
+        self.held = {}  # address -> held envelopes, oldest first
+        self.acked = set()  # (address, id)
         self.signups = []  # emails that asked for a code
         self.requests = []  # (method, path) in order
         self.scripted = []  # (method, path regex, status, body, headers), used once each
@@ -50,6 +55,9 @@ class FakeProvider:
     def fail_next(self, method, path_re, status, body=None, headers=None):
         """Answer the next matching request with this status and body instead of the real one."""
         self.scripted.append((method, re.compile(path_re), status, body, headers or {}))
+
+    def hold(self, address):
+        self.holding.add(address)
 
     def count(self, method, path_re) -> int:
         return sum(1 for m, p in self.requests if m == method and re.fullmatch(path_re, p))
@@ -78,12 +86,18 @@ class FakeProvider:
             if body["id"] in self.sent:
                 return 202, {"id": body["id"], "received": self.sent[body["id"]]["received"]}
             received = now()
+            to = body["to"]
             env = {**body, "from": me, "received": received}
-            self.queues.setdefault(body["to"], []).append(env)
-            for address in {me, body["to"]}:
-                self.history.setdefault(address, []).append(env)
-            self.sent[body["id"]] = {"to": body["to"], "state": "delivered", "received": received, "from": me}
-            return 202, {"id": body["id"], "received": received, "state": "delivered"}
+            self.known.add((me, to))
+            self.history.setdefault(me, []).append(env)
+            state = "delivered"
+            if to in self.holding and (to, me) not in self.known and to != me:
+                state = "held"
+                self.held.setdefault(to, []).append(env)
+            else:
+                self.deliver(to, env)
+            self.sent[body["id"]] = {"to": to, "state": state, "received": received, "from": me}
+            return 202, {"id": body["id"], "received": received, "state": state}
         if path == "/messages" and method == "GET":
             limit = int(query.get("limit", ["10"])[0])
             return 200, {"messages": list(self.queues.get(me, [])[:limit])}
@@ -91,6 +105,7 @@ class FakeProvider:
         if m and method == "POST":
             id = unquote(m[1])
             self.queues[me] = [x for x in self.queues.get(me, []) if x["id"] != id]
+            self.acked.add((me, id))
             if id in self.sent:
                 self.sent[id]["state"] = "acked"
             return 204, None
@@ -104,10 +119,41 @@ class FakeProvider:
         if path == "/history" and method == "GET":
             thread = query.get("thread", [None])[0]
             return 200, {"messages": [m for m in self.history.get(me, []) if thread in (None, m.get("thread"))]}
+        if path == "/history" and method == "DELETE":
+            thread, everything = query.get("thread", [None])[0], query.get("all", [None])[0]
+            if (thread is None) == (everything is None) or everything not in (None, "true"):
+                return 400, {"error": "invalid", "message": "give exactly one of thread and all=true"}
+            def goes(m):
+                mine = m["from"] == me or (me, m["id"]) in self.acked
+                return mine and thread in (None, m.get("thread"))
+            self.history[me] = [m for m in self.history.get(me, []) if not goes(m)]
+            return 204, None
+        if path == "/held" and method == "GET":
+            return 200, {"held": [{"id": m["id"], "from": m["from"], "received": m["received"]}
+                                  for m in self.held.get(me, [])]}
+        m = re.fullmatch(r"/held/([^/]+)/approve", path)
+        if m and method == "POST":
+            first = next((x for x in self.held.get(me, []) if x["id"] == unquote(m[1])), None)
+            if first is None:
+                return 404, {"error": "not_found", "message": "no such held message"}
+            self.known.add((me, first["from"]))
+            for x in [x for x in self.held[me] if x["from"] == first["from"]]:
+                self.held[me].remove(x)
+                self.deliver(me, x)
+                self.sent[x["id"]]["state"] = "delivered"
+            return 204, None
+        if path == "/contacts" and method == "DELETE":
+            self.known.discard((me, query["address"][0]))
+            return 204, None
         if path == "/token/revoke" and method == "POST":
             del self.tokens[token]
             return 204, None
         return 404, {"error": "no_route", "message": f"{method} {path}"}
+
+    def deliver(self, to, env):
+        self.queues.setdefault(to, []).append(env)
+        if to != env["from"]:
+            self.history.setdefault(to, []).append(env)
 
     def _handler(self):
         fake = self
@@ -148,5 +194,8 @@ class FakeProvider:
 
             def do_POST(self):
                 self._serve("POST")
+
+            def do_DELETE(self):
+                self._serve("DELETE")
 
         return Handler

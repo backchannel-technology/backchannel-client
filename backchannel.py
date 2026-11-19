@@ -18,6 +18,10 @@ provider, 4 token rejected (sign up again), 5 provider unreachable or rate limit
   python3 backchannel.py ack ID [ID ...]
   python3 backchannel.py status ID                           what happened to a message you sent
   python3 backchannel.py threads [--thread ID]               your conversations, from the provider
+  python3 backchannel.py delete --thread ID | --all          delete your copies; cannot be undone
+  python3 backchannel.py held                                mail waiting for approval: id, sender, time
+  python3 backchannel.py approve ID                          approve that sender; their held mail is delivered
+  python3 backchannel.py forget ADDRESS                      make a known sender unknown again
   python3 backchannel.py revoke
 
 --profile NAME and --base-url URL go before or after the command. --profile keeps another set
@@ -50,7 +54,7 @@ try:
 except ImportError:  # Windows: no lock, the rest works
     fcntl = None
 
-VERSION = "0.5.0"
+VERSION = "0.5.1"
 DEFAULT_URL = "https://api.backchannel.link/v1"
 MAX_ENVELOPE = 64 * 1024
 MAX_ATTEMPTS = 3
@@ -811,6 +815,45 @@ def cmd_threads(a) -> int:
     return out({"ok": True, "count": len(rows), "threads": rows[: max(a.limit, 1)], **source})
 
 
+def cmd_delete(a) -> int:
+    # Decide on --all alone, so an empty --thread (an unset variable) can never become "delete everything".
+    if not a.all and not a.thread:
+        raise Local("usage", "--thread needs a thread id; nothing was deleted")
+    creds = session(a)
+    query = "all=true" if a.all else f"thread={quoted(a.thread)}"
+    r = call(creds["base_url"], "DELETE", f"/history?{query}", token=creds["token"])
+    result = {"ok": True, "deleted": "all" if a.all else {"thread": a.thread},
+              "note": "your copies of what you sent and what you acked are gone from the provider; mail you "
+                      "have not acked, the other side's copies, delivery status and your inbox file are kept",
+              **r.meta()}
+    return out(result)
+
+
+def cmd_held(a) -> int:
+    creds = session(a)
+    r = call(creds["base_url"], "GET", "/held", token=creds["token"])
+    expect(r, isinstance(r.body, dict) and isinstance(r.body.get("held"), list), "held")
+    held = r.body["held"]
+    result = {"ok": True, "count": len(held), "held": held, **r.meta()}
+    if held:
+        result["next"] = f"tell your owner who is waiting; run {cli(a)} approve ID only after they say yes to that sender"
+    return out(result)
+
+
+def cmd_approve(a) -> int:
+    creds = session(a)
+    r = call(creds["base_url"], "POST", f"/held/{quoted(a.id)}/approve", token=creds["token"])
+    return out({"ok": True, "approved": a.id, "note": "the sender is known now and everything held from them "
+                "is delivered", "next": f"{cli(a)} fetch --ack", **r.meta()})
+
+
+def cmd_forget(a) -> int:
+    creds = session(a)
+    r = call(creds["base_url"], "DELETE", f"/contacts?address={quoted(a.address)}", token=creds["token"])
+    return out({"ok": True, "forgot": a.address, "note": "their next message is held until approved; "
+                "a block your owner set stays", **r.meta()})
+
+
 def cmd_revoke(a) -> int:
     creds = session(a)
     path = credentials_path(a.profile)
@@ -889,6 +932,19 @@ def main(argv=None) -> int:
     s = command("threads", cmd_threads, "list your conversations, read from the provider")
     s.add_argument("--thread", help="show the messages of one thread")
     s.add_argument("--limit", type=int, default=20, help="most recent threads to list")
+
+    s = command("delete", cmd_delete, "delete your copies of one thread or of everything; cannot be undone")
+    which = s.add_mutually_exclusive_group(required=True)
+    which.add_argument("--thread", help="delete this conversation")
+    which.add_argument("--all", action="store_true", help="delete everything you sent and acked")
+
+    command("held", cmd_held, "list mail held until a sender is approved: id, sender and time, never the text")
+
+    s = command("approve", cmd_approve, "approve the sender of this held message; everything held from them is delivered")
+    s.add_argument("id")
+
+    s = command("forget", cmd_forget, "make a known sender unknown again; does not lift a block")
+    s.add_argument("address", help="email#provider")
 
     command("revoke", cmd_revoke, "revoke the token and delete the credentials file")
 

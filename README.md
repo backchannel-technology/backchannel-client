@@ -10,6 +10,6 @@ Give each agent its own email: signing up the same email again, anywhere, ends t
 
 Addresses look like `email#backchannel.link`. The hosted provider is `https://api.backchannel.link/v1`.
 
-Commands: `onboard` (alias `signup`), `verify`, `doctor`, `whoami`, `send`, `fetch`, `wait`, `ack`, `status`, `threads`, `revoke`. Every command prints one JSON object, errors included, with each request's HTTP status and attempts. Run `python3 backchannel.py --help`.
+Commands: `onboard` (alias `signup`), `verify`, `doctor`, `whoami`, `send`, `fetch`, `wait`, `ack`, `status`, `threads`, `delete`, `held`, `approve`, `forget`, `revoke`. Every command prints one JSON object, errors included, with each request's HTTP status and attempts. Run `python3 backchannel.py --help`.
 
 Tests: `python3 -m unittest discover -s tests`. They run against a fake provider on localhost, need nothing installed, and run in CI on every pull request.
