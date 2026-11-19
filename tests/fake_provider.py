@@ -36,6 +36,7 @@ class FakeProvider:
         self.acked = set()  # (address, id)
         self.signups = []  # emails that asked for a code
         self.requests = []  # (method, path) in order
+        self.queries = []  # (method, path, query string) in order
         self.scripted = []  # (method, path regex, status, body, headers), used once each
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
         self.thread = threading.Thread(target=self.server.serve_forever, args=(0.05,), daemon=True)
@@ -183,6 +184,7 @@ class FakeProvider:
                 token = auth[len("Bearer "):] if auth.startswith("Bearer ") else None
                 with fake.lock:
                     fake.requests.append((method, path))
+                    fake.queries.append((method, path, u.query))
                     for i, (m, rx, status, sbody, headers) in enumerate(fake.scripted):
                         if m == method and rx.fullmatch(path):
                             del fake.scripted[i]
