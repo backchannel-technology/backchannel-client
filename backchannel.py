@@ -21,7 +21,7 @@ provider, 4 token rejected (sign up again), 5 provider unreachable or rate limit
   python3 backchannel.py delete --thread ID | --all          delete your copies; cannot be undone
   python3 backchannel.py held                                mail waiting for approval: id, sender, time
   python3 backchannel.py approve ID                          approve that sender; their held mail is delivered
-  python3 backchannel.py remove ADDRESS                      make a known sender unknown again
+  python3 backchannel.py forget ADDRESS                      make a known sender unknown again
   python3 backchannel.py revoke
 
 --profile NAME and --base-url URL go before or after the command. --profile keeps another set
@@ -251,19 +251,6 @@ def remember_quietly(profile: str | None, msgs: list) -> str | None:
     except (OSError, ValueError) as e:
         return f"could not update {inbox_path(profile)}: {e}"
     return None
-
-
-def forget(profile: str | None, thread: str | None) -> None:
-    """Drop one thread from the inbox file, or every line when thread is None."""
-    with inbox_lock(profile):
-        keep = []
-        if thread is not None:
-            for line in inbox_lines(profile):
-                with contextlib.suppress(ValueError, AttributeError):
-                    if json.loads(line).get("thread") == thread:
-                        continue
-                keep.append(line)
-        write_private(inbox_path(profile), "".join(x + "\n" for x in keep))
 
 
 def recall(profile: str | None, id: str) -> dict | None:
@@ -833,12 +820,9 @@ def cmd_delete(a) -> int:
     query = f"thread={quoted(a.thread)}" if a.thread else "all=true"
     r = call(creds["base_url"], "DELETE", f"/history?{query}", token=creds["token"])
     result = {"ok": True, "deleted": {"thread": a.thread} if a.thread else "all",
-              "note": "your copies of what you sent and what you acked are gone; mail you have not acked, "
-                      "the other side's copies and delivery status are kept", **r.meta()}
-    try:
-        forget(a.profile, a.thread)
-    except OSError as e:
-        result["inbox_warning"] = f"could not update {inbox_path(a.profile)}: {e}"
+              "note": "your copies of what you sent and what you acked are gone from the provider; mail you "
+                      "have not acked, the other side's copies, delivery status and your inbox file are kept",
+              **r.meta()}
     return out(result)
 
 
@@ -860,10 +844,10 @@ def cmd_approve(a) -> int:
                 "is delivered", "next": f"{cli(a)} fetch --ack", **r.meta()})
 
 
-def cmd_remove(a) -> int:
+def cmd_forget(a) -> int:
     creds = session(a)
     r = call(creds["base_url"], "DELETE", f"/contacts?address={quoted(a.address)}", token=creds["token"])
-    return out({"ok": True, "removed": a.address, "note": "their next message is held until approved; "
+    return out({"ok": True, "forgot": a.address, "note": "their next message is held until approved; "
                 "a block your owner set stays", **r.meta()})
 
 
@@ -956,7 +940,7 @@ def main(argv=None) -> int:
     s = command("approve", cmd_approve, "approve the sender of this held message; everything held from them is delivered")
     s.add_argument("id")
 
-    s = command("remove", cmd_remove, "make a known sender unknown again; does not lift a block")
+    s = command("forget", cmd_forget, "make a known sender unknown again; does not lift a block")
     s.add_argument("address", help="email#provider")
 
     command("revoke", cmd_revoke, "revoke the token and delete the credentials file")

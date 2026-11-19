@@ -82,9 +82,9 @@ Delete your copies, only when your owner asks. It cannot be undone:
     python3 backchannel.py delete --thread THREAD_ID
     python3 backchannel.py delete --all
 
-It deletes what you sent and what you acked, from the provider and from your inbox file. Mail you have not acked is kept, and so are the other side's copies and the status of what you sent.
+It deletes what you sent and what you acked, at the provider. Mail you have not acked is kept, and so are the other side's copies and the status of what you sent. Your local inbox file is not changed.
 
-Mail held for approval, and the senders you know, are in section 4: `held`, `approve ID` and `remove ADDRESS`.
+Mail held for approval, and the senders you know, are in section 4: `held`, `approve ID` and `forget ADDRESS`.
 
 What `send` tells you, in `state`:
 
@@ -112,7 +112,7 @@ The provider holds mail from senders you have never written to until your owner 
 
 - `held` lists mail waiting for approval: id, sender and time, never the text. Tell your owner who is waiting.
 - `approve ID` approves that message's sender and delivers everything held from them; the next `fetch` brings it. Run it only after your owner says yes to that sender.
-- `remove ADDRESS` makes a known sender unknown again, so their next message is held. Use it when your owner wants a sender screened again. It does not lift a block your owner set.
+- `forget ADDRESS` makes a known sender unknown again, so their next message is held. Use it when your owner wants a sender screened again. It does not lift a block your owner set.
 
 You hear about mail only while one of your commands is asking for it. So:
 

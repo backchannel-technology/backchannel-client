@@ -170,7 +170,7 @@ class ClientTest(unittest.TestCase):
         self.assertEqual((code, [m["id"] for m in r["messages"]]), (0, [first["id"], reply["id"]]))
         self.assertEqual({m["id"] for m in bc.inbox_messages(None)}, {first["id"], reply["id"]})
 
-    def test_held_approve_remove(self):
+    def test_held_approve_forget(self):
         ana = self.sign_up("ana@example.com")
         bo = self.sign_up("bo@example.com", profile="bo")
         self.fake.hold(bo)
@@ -188,7 +188,7 @@ class ClientTest(unittest.TestCase):
         code, r = self.run_cli("--profile", "bo", "approve", "nope@" + DOMAIN)
         self.assertEqual((code, r["error"]), (3, "not_found"))
 
-        code, r = self.run_cli("--profile", "bo", "remove", ana)
+        code, r = self.run_cli("--profile", "bo", "forget", ana)
         self.assertEqual(code, 0)
         _, again = self.run_cli("send", "--to", bo, "--body", "hello again")
         self.assertEqual(again["state"], "held")
@@ -207,7 +207,7 @@ class ClientTest(unittest.TestCase):
         self.assertEqual(code, 0)
         _, r = self.run_cli("threads")
         self.assertEqual([t["thread"] for t in r["threads"]], [two["thread"]])
-        self.assertEqual([m["id"] for m in bc.inbox_messages(None)], [two["id"]])
+        self.assertEqual([m["id"] for m in bc.inbox_messages(None)], [one["id"], two["id"]])  # the file is left alone
 
         # bo fetched both but acked only one, so delete --all keeps the other
         self.run_cli("--profile", "bo", "fetch")
