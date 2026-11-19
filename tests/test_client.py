@@ -170,6 +170,53 @@ class ClientTest(unittest.TestCase):
         self.assertEqual((code, [m["id"] for m in r["messages"]]), (0, [first["id"], reply["id"]]))
         self.assertEqual({m["id"] for m in bc.inbox_messages(None)}, {first["id"], reply["id"]})
 
+    def test_held_approve_remove(self):
+        ana = self.sign_up("ana@example.com")
+        bo = self.sign_up("bo@example.com", profile="bo")
+        self.fake.hold(bo)
+        _, sent = self.run_cli("send", "--to", bo, "--body", "hello", "--subject", "hi")
+        self.assertEqual(sent["state"], "held")
+        code, r = self.run_cli("--profile", "bo", "held")
+        self.assertEqual((code, r["count"], r["held"][0]["from"]), (0, 1, ana))
+        self.assertNotIn("body", r["held"][0])
+        self.assertIn("approve ID only after", r["next"])
+
+        code, r = self.run_cli("--profile", "bo", "approve", sent["id"])
+        self.assertEqual(code, 0)
+        _, got = self.run_cli("--profile", "bo", "fetch", "--ack")
+        self.assertEqual(got["acked"], [sent["id"]])
+        code, r = self.run_cli("--profile", "bo", "approve", "nope@" + DOMAIN)
+        self.assertEqual((code, r["error"]), (3, "not_found"))
+
+        code, r = self.run_cli("--profile", "bo", "remove", ana)
+        self.assertEqual(code, 0)
+        _, again = self.run_cli("send", "--to", bo, "--body", "hello again")
+        self.assertEqual(again["state"], "held")
+
+    def test_delete_thread_and_all(self):
+        bo = self.sign_up("bo@example.com", profile="bo")
+        self.sign_up("ana@example.com")
+        _, one = self.run_cli("send", "--to", bo, "--body", "first")
+        _, two = self.run_cli("send", "--to", bo, "--body", "second")
+        for argv in ([], ["--thread", one["thread"], "--all"]):
+            code, r = self.run_cli("delete", *argv)
+            self.assertEqual((code, r["error"]), (1, "usage"))
+        self.assertEqual(self.fake.count("DELETE", "/history"), 0)
+
+        code, r = self.run_cli("delete", "--thread", one["thread"])
+        self.assertEqual(code, 0)
+        _, r = self.run_cli("threads")
+        self.assertEqual([t["thread"] for t in r["threads"]], [two["thread"]])
+        self.assertEqual([m["id"] for m in bc.inbox_messages(None)], [two["id"]])
+
+        # bo fetched both but acked only one, so delete --all keeps the other
+        self.run_cli("--profile", "bo", "fetch")
+        self.run_cli("--profile", "bo", "ack", one["id"])
+        code, r = self.run_cli("--profile", "bo", "delete", "--all")
+        self.assertEqual((code, r["deleted"]), (0, "all"))
+        _, r = self.run_cli("--profile", "bo", "threads")
+        self.assertEqual([t["last_id"] for t in r["threads"]], [two["id"]])
+
     def test_reply_to_unknown_id_needs_thread(self):
         self.sign_up()
         code, r = self.run_cli("send", "--to", "x@y.z#fake.test", "--body", "b", "--reply-to", "nope@fake.test")
