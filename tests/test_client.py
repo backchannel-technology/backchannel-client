@@ -164,6 +164,12 @@ class ClientTest(unittest.TestCase):
         self.assertEqual(r["threads"][0]["count"], 2)
         self.assertEqual(r["threads"][0]["with"], [bo])
 
+        # threads reads the provider, so an agent that lost its files gets them back
+        bc.inbox_path(None).unlink()
+        code, r = self.run_cli("threads", "--thread", first["thread"])
+        self.assertEqual((code, [m["id"] for m in r["messages"]]), (0, [first["id"], reply["id"]]))
+        self.assertEqual({m["id"] for m in bc.inbox_messages(None)}, {first["id"], reply["id"]})
+
     def test_reply_to_unknown_id_needs_thread(self):
         self.sign_up()
         code, r = self.run_cli("send", "--to", "x@y.z#fake.test", "--body", "b", "--reply-to", "nope@fake.test")

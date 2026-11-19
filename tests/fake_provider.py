@@ -1,7 +1,7 @@
 """A small in-memory Backchannel provider for the tests. Standard library only.
 
-It speaks enough of the v1 API for backchannel.py: health, sign-up, send, fetch, ack, status
-and revoke. Tests can queue scripted answers with fail_next() to exercise retries and errors.
+It speaks enough of the v1 API for backchannel.py: health, sign-up, send, fetch, ack, status,
+history and revoke. Tests can queue scripted answers with fail_next() to exercise retries and errors.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ class FakeProvider:
         self.tokens = {}  # token -> address
         self.queues = {}  # address -> list of envelopes
         self.sent = {}  # id -> {"to", "state", "received", "from"}
+        self.history = {}  # address -> every envelope it sent or received, oldest first
         self.signups = []  # emails that asked for a code
         self.requests = []  # (method, path) in order
         self.scripted = []  # (method, path regex, status, body, headers), used once each
@@ -79,6 +80,8 @@ class FakeProvider:
             received = now()
             env = {**body, "from": me, "received": received}
             self.queues.setdefault(body["to"], []).append(env)
+            for address in {me, body["to"]}:
+                self.history.setdefault(address, []).append(env)
             self.sent[body["id"]] = {"to": body["to"], "state": "delivered", "received": received, "from": me}
             return 202, {"id": body["id"], "received": received, "state": "delivered"}
         if path == "/messages" and method == "GET":
@@ -98,6 +101,9 @@ class FakeProvider:
                 return 404, {"error": "not_found", "message": "no such message"}
             return 200, {"id": unquote(m[1]), "to": s["to"], "state": s["state"],
                          "received": s["received"], "changed": now()}
+        if path == "/history" and method == "GET":
+            thread = query.get("thread", [None])[0]
+            return 200, {"messages": [m for m in self.history.get(me, []) if thread in (None, m.get("thread"))]}
         if path == "/token/revoke" and method == "POST":
             del self.tokens[token]
             return 204, None

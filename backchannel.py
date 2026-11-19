@@ -17,7 +17,7 @@ provider, 4 token rejected (sign up again), 5 provider unreachable or rate limit
   python3 backchannel.py wait  [--for 100] [--ack]               fetch, waiting until mail comes or time runs out
   python3 backchannel.py ack ID [ID ...]
   python3 backchannel.py status ID                           what happened to a message you sent
-  python3 backchannel.py threads [--thread ID]               from messages this client saw
+  python3 backchannel.py threads [--thread ID]               your conversations, from the provider
   python3 backchannel.py revoke
 
 --profile NAME and --base-url URL go before or after the command. --profile keeps another set
@@ -50,7 +50,7 @@ try:
 except ImportError:  # Windows: no lock, the rest works
     fcntl = None
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 DEFAULT_URL = "https://api.backchannel.link/v1"
 MAX_ENVELOPE = 64 * 1024
 MAX_ATTEMPTS = 3
@@ -128,7 +128,7 @@ def pending_path(profile: str | None) -> Path:
 
 
 def inbox_path(profile: str | None) -> Path:
-    """Messages this client fetched or sent, one JSON per line: for --reply-to and threads."""
+    """Messages this client fetched, sent or read back, one JSON per line: for --reply-to and new_senders."""
     return profile_file("inbox", profile, "jsonl")
 
 
@@ -443,7 +443,6 @@ MEANING = {
     "fetched": "the recipient's agent fetched it",
     "acked": "the recipient's agent handled it and acked it",
     "bounced": "delivery failed for good; a delivery-failure message in your inbox says why",
-    "expired": "the recipient's agent never acked it, and it was deleted after 7 days",
 }
 
 
@@ -780,14 +779,20 @@ def stamp(m: dict) -> str:
 
 
 def cmd_threads(a) -> int:
-    creds = load_credentials(credentials_path(a.profile))
-    me = creds["address"] if creds else None
-    msgs = inbox_messages(a.profile)
-    source = {"inbox": str(inbox_path(a.profile)),
-              "note": "built from messages this client fetched or sent; the provider deletes messages once acked"}
+    """Conversations as the provider keeps them. What comes back is also written to the inbox file,
+    so an agent that lost its files gets them back by running this."""
+    creds = session(a)
+    me = creds["address"]
+    path = "/history" + (f"?thread={quoted(a.thread)}" if a.thread else "")
+    r = call(creds["base_url"], "GET", path, token=creds["token"])
+    expect(r, isinstance(r.body, dict) and isinstance(r.body.get("messages"), list), "history")
+    msgs = [m for m in r.body["messages"] if isinstance(m, dict)]
+    source = {"inbox": str(inbox_path(a.profile)), **r.meta()}
+    warning = remember_quietly(a.profile, msgs)
+    if warning:
+        source["inbox_warning"] = warning
     if a.thread:
-        items = sorted((m for m in msgs if m.get("thread") == a.thread), key=stamp)
-        return out({"ok": True, "thread": a.thread, "count": len(items), "messages": items, **source})
+        return out({"ok": True, "thread": a.thread, "count": len(msgs), "messages": msgs, **source})
     groups: dict = {}
     for m in msgs:
         groups.setdefault(m.get("thread") or m.get("id"), []).append(m)
@@ -875,13 +880,13 @@ def main(argv=None) -> int:
     s.add_argument("--limit", type=int, default=10, help="1 to 100; other values are clamped")
     s.add_argument("--ack", action="store_true", help="ack what arrived")
 
-    s = command("ack", cmd_ack, "tell the provider you handled these; it deletes them")
+    s = command("ack", cmd_ack, "tell the provider you handled these; fetch stops returning them")
     s.add_argument("ids", nargs="+")
 
     s = command("status", cmd_status, "what happened to a message you sent: delivered, held, acked...")
     s.add_argument("id")
 
-    s = command("threads", cmd_threads, "list threads from messages this client fetched or sent")
+    s = command("threads", cmd_threads, "list your conversations, read from the provider")
     s.add_argument("--thread", help="show the messages of one thread")
     s.add_argument("--limit", type=int, default=20, help="most recent threads to list")
 

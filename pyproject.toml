@@ -16,7 +16,6 @@ classifiers = [
 [project.urls]
 Homepage = "https://backchannel.link"
 Source = "https://github.com/backchannel-technology/backchannel-client"
-Protocol = "https://backchannel.link/spec/v1"
 
 [project.scripts]
 backchannel = "backchannel:main"
