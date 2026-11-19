@@ -130,6 +130,22 @@ class ClientTest(unittest.TestCase):
         code, got = self.run_cli("--profile", "bo", "fetch")
         self.assertEqual(got["count"], 0)
 
+    def test_send_wait_returns_the_mail_that_arrives(self):
+        ana = self.sign_up("ana@example.com")
+        code, r = self.run_cli("send", "--to", ana, "--body", "note to self", "--wait", "100", "--ack")
+        self.assertEqual((code, r["ok"], r["state"]), (0, True, "delivered"))
+        w = r["wait"]
+        self.assertEqual((w["mail"], w["count"], w["polls"]), (True, 1, 1))
+        self.assertEqual(w["acked"], [r["id"]])
+
+    def test_send_wait_skips_when_held(self):
+        self.sign_up("ana@example.com")
+        id = "x" * 22 + "@" + DOMAIN
+        self.fake.fail_next("POST", "/messages", 202, {"id": id, "received": "2026-11-18T00:00:00Z", "state": "held"})
+        code, r = self.run_cli("send", "--to", "bo@example.com#" + DOMAIN, "--body", "hi", "--id", id, "--wait", "100")
+        self.assertEqual((code, r["state"], r["wait"]["skipped"]), (0, "held", True))
+        self.assertEqual(self.fake.count("GET", "/messages"), 0)
+
     def test_reply_keeps_thread_and_subject(self):
         ana = self.sign_up("ana@example.com")
         bo = self.sign_up("bo@example.com", profile="bo")
