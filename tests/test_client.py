@@ -198,7 +198,7 @@ class ClientTest(unittest.TestCase):
         self.sign_up("ana@example.com")
         _, one = self.run_cli("send", "--to", bo, "--body", "first")
         _, two = self.run_cli("send", "--to", bo, "--body", "second")
-        for argv in ([], ["--thread", one["thread"], "--all"]):
+        for argv in ([], ["--thread", one["thread"], "--all"], ["--thread", ""]):
             code, r = self.run_cli("delete", *argv)
             self.assertEqual((code, r["error"]), (1, "usage"))
         self.assertEqual(self.fake.count("DELETE", "/history"), 0)

@@ -816,10 +816,13 @@ def cmd_threads(a) -> int:
 
 
 def cmd_delete(a) -> int:
+    # Decide on --all alone, so an empty --thread (an unset variable) can never become "delete everything".
+    if not a.all and not a.thread:
+        raise Local("usage", "--thread needs a thread id; nothing was deleted")
     creds = session(a)
-    query = f"thread={quoted(a.thread)}" if a.thread else "all=true"
+    query = "all=true" if a.all else f"thread={quoted(a.thread)}"
     r = call(creds["base_url"], "DELETE", f"/history?{query}", token=creds["token"])
-    result = {"ok": True, "deleted": {"thread": a.thread} if a.thread else "all",
+    result = {"ok": True, "deleted": "all" if a.all else {"thread": a.thread},
               "note": "your copies of what you sent and what you acked are gone from the provider; mail you "
                       "have not acked, the other side's copies, delivery status and your inbox file are kept",
               **r.meta()}
