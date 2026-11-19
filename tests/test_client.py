@@ -209,6 +209,8 @@ class ClientTest(unittest.TestCase):
         self.fake.fail_next("GET", "/messages", 200, {"messages": [], "held": [old, new]})
         code, r = self.run_cli("--profile", "bo", "wait", "--for", "100")
         self.assertEqual((code, r["mail"], r["polls"], r["new_held"]), (0, False, 2, [new]))
+        waits = [q for m, p, q in self.fake.queries if (m, p) == ("GET", "/messages")][-2:]
+        self.assertEqual([("wait=0" in q) for q in waits], [True, False])  # the start is read without waiting
 
         code, r = self.run_cli("--profile", "bo", "decline", sent["id"])
         self.assertEqual((code, r["declined"]), (0, sent["id"]))

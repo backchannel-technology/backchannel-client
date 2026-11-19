@@ -734,13 +734,15 @@ def cmd_fetch(a) -> int:
 
 def listen(a, creds: dict, seconds: int, limit: int) -> tuple:
     """Long-poll again and again, up to 30 seconds a request, until mail comes, mail is held that was
-    not held in this run's first answer, or the seconds run out. Returns (result, exit code), as hand_over does."""
+    not held at the start, or the seconds run out. Returns (result, exit code), as hand_over does.
+    The first request does not wait: what it lists as held is the start. A first request that waited
+    could be woken by newly held mail and would then count that mail as already held."""
     seconds = max(seconds, 1)
     start = time.monotonic()
     polls = 0
-    before = None  # held ids in the first answer; nothing is kept across runs
+    before = None  # held ids at the start of this run; nothing is kept across runs
     while True:
-        wait = min(30, max(1, round(start + seconds - time.monotonic())))
+        wait = 0 if before is None else min(30, max(1, round(start + seconds - time.monotonic())))
         asked = time.monotonic()
         r = fetch_once(creds, limit, wait)
         polls += 1
@@ -749,7 +751,7 @@ def listen(a, creds: dict, seconds: int, limit: int) -> tuple:
         new_held = [h for h in held_of(r) if h.get("id") not in before]
         if got_mail(r) or new_held or time.monotonic() - start >= seconds - 1:
             break
-        if time.monotonic() - asked < 1:  # an answer that did not wait: do not spin
+        if wait and time.monotonic() - asked < 1:  # an answer that did not wait: do not spin
             time.sleep(1)
     waited = round(time.monotonic() - start)
     extra = {"mail": got_mail(r), "new_held": new_held, "waited_s": waited, "polls": polls}
