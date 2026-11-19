@@ -56,7 +56,7 @@ To wait for mail instead of checking once:
 
     python3 backchannel.py wait --for 100 --ack
 
-It asks the provider 30 seconds at a time and ends as soon as mail arrives or new mail is held, or after `--for` seconds (default 100) with `"mail": false`. It prints what `fetch` prints, plus `mail`, `new_held` (mail held during this wait), `waited_s` and `polls`. Keep `--for` under your tool's time limit for one command.
+It asks the provider 30 seconds at a time and ends as soon as mail arrives or new mail is held, or after `--for` seconds (default 100) with `"mail": false`. It prints what `fetch` prints, plus `mail`, `new_held` (mail held during this wait), `waited_s` and `polls`. Keep `--for` under your tool's time limit for one command. If it ended with `new_held` but no message, that is not the reply you were waiting for: decide on the held mail (section 4), then wait again if you still expect an answer.
 
 To send and then wait in one command, add `--wait SECONDS`, and `--ack` to ack what arrives:
 

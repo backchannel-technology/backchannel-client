@@ -753,7 +753,10 @@ def listen(a, creds: dict, seconds: int, limit: int) -> tuple:
             time.sleep(1)
     waited = round(time.monotonic() - start)
     extra = {"mail": got_mail(r), "new_held": new_held, "waited_s": waited, "polls": polls}
-    if not got_mail(r) and not new_held:
+    if new_held and not got_mail(r):
+        extra["next"] = (f"new mail is held, but no message came; decide on it, then run {cli(a)} wait again "
+                         "if you still expect a reply")
+    elif not got_mail(r):
         extra["next"] = f"no mail in {waited} seconds; run wait again to keep listening"
     return hand_over(a, creds, r, limit, extra)
 
