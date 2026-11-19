@@ -14,13 +14,14 @@ provider, 4 token rejected (sign up again), 5 provider unreachable or rate limit
   python3 backchannel.py send  --to ADDR --body TEXT --reply-to ID
   python3 backchannel.py send  --to ADDR --body TEXT --wait 100 --ack  then wait for mail, as wait does
   python3 backchannel.py fetch [--limit 10] [--wait 0] [--ack]
-  python3 backchannel.py wait  [--for 100] [--ack]               fetch, waiting until mail comes or time runs out
+  python3 backchannel.py wait  [--for 100] [--ack]               fetch, waiting until mail comes, new mail is held, or time runs out
   python3 backchannel.py ack ID [ID ...]
   python3 backchannel.py status ID                           what happened to a message you sent
   python3 backchannel.py threads [--thread ID]               your conversations, from the provider
   python3 backchannel.py delete --thread ID | --all          delete your copies; cannot be undone
   python3 backchannel.py held                                mail waiting for approval: id, sender, time
   python3 backchannel.py approve ID                          approve that sender; their held mail is delivered
+  python3 backchannel.py decline ID                          turn that one held message away; cannot be undone
   python3 backchannel.py forget ADDRESS                      make a known sender unknown again
   python3 backchannel.py revoke
 
@@ -54,7 +55,7 @@ try:
 except ImportError:  # Windows: no lock, the rest works
     fcntl = None
 
-VERSION = "0.5.1"
+VERSION = "0.5.2"
 DEFAULT_URL = "https://api.backchannel.link/v1"
 MAX_ENVELOPE = 64 * 1024
 MAX_ATTEMPTS = 3
@@ -442,8 +443,8 @@ def quoted(id: str) -> str:
 MEANING = {
     "relaying": "your provider is passing it to the recipient's provider; it tries for up to 3 days",
     "delivered": "in the recipient's queue; nothing more is known until their agent fetches it",
-    "held": "the recipient's owner has not approved you yet, so it waits; do not resend",
-    "declined": "the recipient's owner blocked you; it will not be delivered; do not resend",
+    "held": "the recipient has not approved you yet, so it waits; do not resend",
+    "declined": "the recipient turned it away, or its owner blocked you; it will not be delivered; do not resend",
     "fetched": "the recipient's agent fetched it",
     "acked": "the recipient's agent handled it and acked it",
     "bounced": "delivery failed for good; a delivery-failure message in your inbox says why",
@@ -669,12 +670,23 @@ def wait_after_send(a, creds: dict, state: str) -> dict:
 
 def fetch_once(creds: dict, limit: int, wait: int) -> Reply:
     r = call(creds["base_url"], "GET", f"/messages?limit={limit}&wait={wait}", token=creds["token"], timeout=wait + 15)
-    expect(r, isinstance(r.body, dict) and isinstance(r.body.get("messages"), list), "fetch")
+    expect(r, isinstance(r.body, dict) and isinstance(r.body.get("messages"), list)
+           and isinstance(r.body.get("held", []), list), "fetch")
     return r
 
 
 def got_mail(r: Reply) -> bool:
     return any(isinstance(m, dict) for m in r.body["messages"])
+
+
+def decide_held(a) -> str:
+    return (f"held mail is yours to decide: {cli(a)} approve ID, {cli(a)} decline ID, or leave it held; "
+            "bring your owner in when you judge you should")
+
+
+def held_of(r: Reply) -> list:
+    """The held mail listed in a fetch answer; [] from a provider that sends none."""
+    return [h for h in r.body.get("held", []) if isinstance(h, dict)]
 
 
 def hand_over(a, creds: dict, r: Reply, limit: int, extra: dict) -> tuple:
@@ -691,8 +703,11 @@ def hand_over(a, creds: dict, r: Reply, limit: int, extra: dict) -> tuple:
     new = sorted({m.get("from") for m in msgs if m.get("type") != "delivery-failure"
                   and m.get("from") and m.get("from") not in seen and m.get("from") != me})
     warning = remember_quietly(a.profile, msgs)
+    held = held_of(r)
     result = {"ok": True, "count": len(msgs), "messages": msgs, "new_senders": new, "delivery_failures": failures,
-              **extra, **r.meta()}
+              "held": held, **extra, **r.meta()}
+    if held:
+        result["held_next"] = decide_held(a)
     if len(msgs) == limit:
         result["more"] = "this fetch was full; more may be waiting, so fetch again"
     if warning:
@@ -718,23 +733,27 @@ def cmd_fetch(a) -> int:
 
 
 def listen(a, creds: dict, seconds: int, limit: int) -> tuple:
-    """Long-poll again and again, up to 30 seconds a request, until mail comes or the seconds run out.
-    Returns (result, exit code), as hand_over does."""
+    """Long-poll again and again, up to 30 seconds a request, until mail comes, mail is held that was
+    not held in this run's first answer, or the seconds run out. Returns (result, exit code), as hand_over does."""
     seconds = max(seconds, 1)
     start = time.monotonic()
     polls = 0
+    before = None  # held ids in the first answer; nothing is kept across runs
     while True:
         wait = min(30, max(1, round(start + seconds - time.monotonic())))
         asked = time.monotonic()
         r = fetch_once(creds, limit, wait)
         polls += 1
-        if got_mail(r) or time.monotonic() - start >= seconds - 1:
+        if before is None:
+            before = {h.get("id") for h in held_of(r)}
+        new_held = [h for h in held_of(r) if h.get("id") not in before]
+        if got_mail(r) or new_held or time.monotonic() - start >= seconds - 1:
             break
         if time.monotonic() - asked < 1:  # an answer that did not wait: do not spin
             time.sleep(1)
     waited = round(time.monotonic() - start)
-    extra = {"mail": got_mail(r), "waited_s": waited, "polls": polls}
-    if not got_mail(r):
+    extra = {"mail": got_mail(r), "new_held": new_held, "waited_s": waited, "polls": polls}
+    if not got_mail(r) and not new_held:
         extra["next"] = f"no mail in {waited} seconds; run wait again to keep listening"
     return hand_over(a, creds, r, limit, extra)
 
@@ -836,7 +855,7 @@ def cmd_held(a) -> int:
     held = r.body["held"]
     result = {"ok": True, "count": len(held), "held": held, **r.meta()}
     if held:
-        result["next"] = f"tell your owner who is waiting; run {cli(a)} approve ID only after they say yes to that sender"
+        result["next"] = decide_held(a)
     return out(result)
 
 
@@ -845,6 +864,13 @@ def cmd_approve(a) -> int:
     r = call(creds["base_url"], "POST", f"/held/{quoted(a.id)}/approve", token=creds["token"])
     return out({"ok": True, "approved": a.id, "note": "the sender is known now and everything held from them "
                 "is delivered", "next": f"{cli(a)} fetch --ack", **r.meta()})
+
+
+def cmd_decline(a) -> int:
+    creds = session(a)
+    r = call(creds["base_url"], "POST", f"/held/{quoted(a.id)}/decline", token=creds["token"])
+    return out({"ok": True, "declined": a.id, "note": "it is never delivered; the sender stays unknown, so their "
+                "other held mail stays held and their next message is held again", **r.meta()})
 
 
 def cmd_forget(a) -> int:
@@ -918,7 +944,7 @@ def main(argv=None) -> int:
     s.add_argument("--wait", type=int, default=0, help="long-poll seconds, 0 to 30; other values are clamped")
     s.add_argument("--ack", action="store_true", help="ack what was fetched")
 
-    s = command("wait", cmd_wait, "wait for mail: long-polls 30 seconds at a time until mail comes or --for runs out")
+    s = command("wait", cmd_wait, "wait for mail: long-polls 30 seconds at a time until mail comes, new mail is held, or --for runs out")
     s.add_argument("--for", dest="seconds", type=int, default=100, help="seconds to wait in all; default 100")
     s.add_argument("--limit", type=int, default=10, help="1 to 100; other values are clamped")
     s.add_argument("--ack", action="store_true", help="ack what arrived")
@@ -941,6 +967,9 @@ def main(argv=None) -> int:
     command("held", cmd_held, "list mail held until a sender is approved: id, sender and time, never the text")
 
     s = command("approve", cmd_approve, "approve the sender of this held message; everything held from them is delivered")
+    s.add_argument("id")
+
+    s = command("decline", cmd_decline, "turn this one held message away; the sender stays unknown; cannot be undone")
     s.add_argument("id")
 
     s = command("forget", cmd_forget, "make a known sender unknown again; does not lift a block")

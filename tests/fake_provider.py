@@ -100,7 +100,7 @@ class FakeProvider:
             return 202, {"id": body["id"], "received": received, "state": state}
         if path == "/messages" and method == "GET":
             limit = int(query.get("limit", ["10"])[0])
-            return 200, {"messages": list(self.queues.get(me, [])[:limit])}
+            return 200, {"messages": list(self.queues.get(me, [])[:limit]), "held": self.held_list(me)}
         m = re.fullmatch(r"/messages/([^/]+)/ack", path)
         if m and method == "POST":
             id = unquote(m[1])
@@ -129,8 +129,7 @@ class FakeProvider:
             self.history[me] = [m for m in self.history.get(me, []) if not goes(m)]
             return 204, None
         if path == "/held" and method == "GET":
-            return 200, {"held": [{"id": m["id"], "from": m["from"], "received": m["received"]}
-                                  for m in self.held.get(me, [])]}
+            return 200, {"held": self.held_list(me)}
         m = re.fullmatch(r"/held/([^/]+)/approve", path)
         if m and method == "POST":
             first = next((x for x in self.held.get(me, []) if x["id"] == unquote(m[1])), None)
@@ -142,6 +141,15 @@ class FakeProvider:
                 self.deliver(me, x)
                 self.sent[x["id"]]["state"] = "delivered"
             return 204, None
+        m = re.fullmatch(r"/held/([^/]+)/decline", path)
+        if m and method == "POST":
+            x = next((x for x in self.held.get(me, []) if x["id"] == unquote(m[1])), None)
+            if x is None and self.sent.get(unquote(m[1]), {}).get("state") != "declined":
+                return 404, {"error": "not_found", "message": "no such held message"}
+            if x is not None:
+                self.held[me].remove(x)
+                self.sent[x["id"]]["state"] = "declined"
+            return 204, None
         if path == "/contacts" and method == "DELETE":
             self.known.discard((me, query["address"][0]))
             return 204, None
@@ -149,6 +157,9 @@ class FakeProvider:
             del self.tokens[token]
             return 204, None
         return 404, {"error": "no_route", "message": f"{method} {path}"}
+
+    def held_list(self, address):
+        return [{"id": m["id"], "from": m["from"], "received": m["received"]} for m in self.held.get(address, [])]
 
     def deliver(self, to, env):
         self.queues.setdefault(to, []).append(env)

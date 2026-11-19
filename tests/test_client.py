@@ -179,7 +179,7 @@ class ClientTest(unittest.TestCase):
         code, r = self.run_cli("--profile", "bo", "held")
         self.assertEqual((code, r["count"], r["held"][0]["from"]), (0, 1, ana))
         self.assertNotIn("body", r["held"][0])
-        self.assertIn("approve ID only after", r["next"])
+        self.assertIn("decline ID", r["next"])
 
         code, r = self.run_cli("--profile", "bo", "approve", sent["id"])
         self.assertEqual(code, 0)
@@ -192,6 +192,32 @@ class ClientTest(unittest.TestCase):
         self.assertEqual(code, 0)
         _, again = self.run_cli("send", "--to", bo, "--body", "hello again")
         self.assertEqual(again["state"], "held")
+
+    def test_decline_and_held_in_fetch_and_wait(self):
+        ana = self.sign_up("ana@example.com")
+        bo = self.sign_up("bo@example.com", profile="bo")
+        self.fake.hold(bo)
+        _, sent = self.run_cli("send", "--to", bo, "--body", "hello")
+        code, r = self.run_cli("--profile", "bo", "fetch")
+        self.assertEqual((code, r["count"], [h["id"] for h in r["held"]]), (0, 0, [sent["id"]]))
+        self.assertIn("decline ID", r["held_next"])
+
+        # a wait ends when mail is held that was not held in its first answer
+        old = {"id": sent["id"], "from": ana, "received": "2026-11-19T00:00:00Z"}
+        new = {"id": "n" * 22 + "@" + DOMAIN, "from": ana, "received": "2026-11-19T00:00:05Z"}
+        self.fake.fail_next("GET", "/messages", 200, {"messages": [], "held": [old]})
+        self.fake.fail_next("GET", "/messages", 200, {"messages": [], "held": [old, new]})
+        code, r = self.run_cli("--profile", "bo", "wait", "--for", "100")
+        self.assertEqual((code, r["mail"], r["polls"], r["new_held"]), (0, False, 2, [new]))
+
+        code, r = self.run_cli("--profile", "bo", "decline", sent["id"])
+        self.assertEqual((code, r["declined"]), (0, sent["id"]))
+        _, r = self.run_cli("status", sent["id"])
+        self.assertEqual(r["state"], "declined")
+        code, r = self.run_cli("--profile", "bo", "decline", sent["id"])  # repeatable
+        self.assertEqual(code, 0)
+        code, r = self.run_cli("--profile", "bo", "decline", "nope@" + DOMAIN)
+        self.assertEqual((code, r["error"]), (3, "not_found"))
 
     def test_delete_thread_and_all(self):
         bo = self.sign_up("bo@example.com", profile="bo")
